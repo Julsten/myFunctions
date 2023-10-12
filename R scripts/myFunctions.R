@@ -426,14 +426,15 @@ rain_cloud_plot<- function(
   require(tidyverse)
   require(ggplot2)
   
-
-  cond_colors <- brewer.pal(length(unique(data[[group_val]])), "Dark2")
+  if(!is.factor(data[[group_var]])) data[[group_var]] <- as.factor(data[[group_var]])
+  cond_colors <- brewer.pal(length(unique(data[[group_var]])), "Dark2")
   
   pp_means <- data %>% group_by_at(all_of(c(group_var, id, fill))) %>% 
     summarise(mean_y = mean(y))
   
+
   
-  out_plot <- ggplot(data = data, aes(x={{group_var}}, y={{y}}, fill = {{fill}})) +
+  out_plot <- ggplot(data = data, aes(x=.data[[group_var]], y=.data[[y]], fill = .data[[fill]])) +
     ggdist::stat_halfeye(
       # custom bandwidth
       adjust = .5, 
@@ -456,7 +457,7 @@ rain_cloud_plot<- function(
     stat_summary(fun.y =mean, geom = "line", aes(group =1), linewidth  =1, alpha = 0.2) +
     gghalves::geom_half_point(
       data = pp_means,
-      aes(x = {{group_var}}, y = mean_y),
+      aes(x = .data[[group_var]], y = mean_y),
       transformation = position_jitter(height = 0),
       # draw jitter on the left
       side = "l",
@@ -465,19 +466,20 @@ rain_cloud_plot<- function(
       # add transparency
       alpha = alpha_val
     ) +
-    #facet_wrap(~participant)+
     theme_minimal() +
     scale_fill_manual(values = cond_colors,
-                      labels = levels(data[["group_val"]]))+
-    theme(legend.position = "none",
-          text =element_text(size = text_size)) 
+                      labels = levels(as.factor(data[[group_var]])))
   
   out_plot
 
 }
 
-# testing
-rain_cloud_plot(df, y = "y", group_var = "a", id = "id")
+# testing rain cloud plot
+# 
+# df <- data.frame(id = rep(1:4, each = 5), group = rep(1:5, times = 4))
+# df <- rbind(df, df, df, df)
+# df$y <- rnorm(nrow(df))
+# rain_cloud_plot(df, y = "y", group_var = "group", id = "id")
 
 
 # Test Data for grouped within paired difference barplot
