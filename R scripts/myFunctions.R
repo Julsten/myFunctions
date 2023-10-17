@@ -474,6 +474,25 @@ rain_cloud_plot<- function(
 
 }
 
+
+
+caret_BAC <- function(data, lev = NULL, model = NULL) {
+  # Calculate sensitivity and specificity
+  sensitivity <- posPredValue(data$pred, data$obs, positive = lev[1])
+  specificity <- negPredValue(data$pred, data$obs, positive = lev[2])
+  if(is.na(sensitivity)) sensitivity <- 0
+  if(is.na(specificity)) specificity <- 0
+  
+  # Calculate balanced accuracy
+  bal_acc <- (sensitivity + specificity) / 2
+  
+  # Return as named vector
+  out <- c(bal_acc)
+  names(out) <- "Balanced Accuracy"
+  
+  out
+}
+
 # testing rain cloud plot
 # 
 # df <- data.frame(id = rep(1:4, each = 5), group = rep(1:5, times = 4))
