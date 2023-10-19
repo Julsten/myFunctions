@@ -527,3 +527,143 @@ caret_BAC <- function(data, lev = NULL, model = NULL) {
 #   mutate(time = factor(case_when(cond %in% c("a_1", "b_1") ~ 1, TRUE ~ 2))) %>% select(-cond)
 
 
+
+permutation_importance <- function(model, 
+                                   new_data, 
+                                   target_name, 
+                                   target_level = NULL,
+                                   performance_score = c("ROC", "RMSE", "Rsquared", "MAE"),
+                                   n_permut = 10, 
+                                   verbose =T, 
+                                   seed = 123){
+  
+  train_data <- new_data
+  
+  
+  if("Classification" %in% model$modelType){
+    
+    predicted_values <- predict(model, newdata = train_data,  type = "prob")[[target_level]]
+    perf_full <- suppressMessages(pROC::roc(factor(train_data[[target_name]]), predicted_values, type="prob")$auc)
+  }
+  
+  if("Regression" %in% model$modelType){
+    predicted_values <- predict(model, newdata = train_data)
+    perf_full <- postResample(pred = predicted_values, obs = train_data[[target_name]])[performance_score]
+    
+  }
+  
+  out_df <- data.frame()
+  # permute feature
+  colnames <- colnames(train_data)
+  feature_names <- setdiff(colnames,target_name)
+  
+  
+  for (feature in feature_names){
+    
+    perm_vec <- numeric(n_permut)
+    perf_perm_vec <- numeric(n_permut)
+    perf_full_vec <- numeric(n_permut)
+    perf_diff_vec <- numeric(n_permut)
+    perf_ratio_vec <- numeric(n_permut)
+    for(p in 1:n_permut){
+      
+      
+      if(verbose) print(paste0("feature: ", feature, ", permutation: ", p, ", ", 
+                               which(feature == feature_names), "/", length(feature_names), " done"))
+      
+      #permute feature
+      to_permute <- feature
+      train_perm <- train_data
+      set.seed(seed + p)
+      train_perm[[to_permute]] <- train_perm[[to_permute]][sample(1:length(train_perm[[to_permute]]))]
+      # new performance score
+      if("Classification" %in% model$modelType) {
+        pred_perm <- predict(model, newdata = train_perm , type = "prob")[[target_level]]
+        perf_perm <- suppressMessages(pROC::roc(factor(train_data[[target_name]]), pred_perm, type="prob")$auc) 
+      }
+      if("Regression" %in% model$modelType){
+        pred_perm <- predict(model, newdata = train_perm)
+        perf_perm <- postResample(pred = pred_perm, obs = train_data[[target_name]])[performance_score]
+      }
+      
+      
+      
+      perf_diff <- perf_full - perf_perm
+      perf_ratio <- perf_full/perf_perm
+      
+      perm_vec[p] <- p
+      perf_full_vec[p] <- perf_full
+      perf_perm_vec[p] <- perf_perm
+      perf_diff_vec[p] <- perf_diff
+      perf_ratio_vec[p] <- perf_ratio
+      
+    }
+    
+    if (sd(perf_diff_vec) != 0){
+      
+      perf_diff_CI <- wilcox.test(perf_diff_vec, conf.int = T, conf.level = 0.95)$conf.int
+      perf_ratio_CI <- wilcox.test(perf_ratio_vec, conf.int = T, conf.level = 0.95, mu = 1)$conf.int
+      perf_mean_diff <- mean(perf_diff_vec)
+      perf_mean_ratio <- mean(perf_ratio_vec)
+      perf_se_diff <- sd(perf_diff_vec)/sqrt(length(perf_diff_vec))
+      perf_se_ratio <- sd(perf_ratio_vec)/sqrt(length(perf_ratio_vec))
+    }
+    
+    else{
+      perf_diff_CI <- c(0,0)
+      perf_ratio_CI <- c(0,0)
+      perf_mean_diff <- mean(perf_diff_vec)
+      perf_mean_ratio <- mean(perf_ratio_vec)
+      perf_se_diff <-0
+      perf_se_ratio <-0
+      
+    }
+    
+    out_df <- rbind(out_df, data.frame(feature = to_permute, performance_score,
+                                       perf_diff = perf_mean_diff, diff_se = perf_se_diff, 
+                                       diff_CI95_L= perf_diff_CI[1], diff_CI95_H= perf_diff_CI[2], 
+                                       perf_ratio = perf_mean_ratio, ratio_se = perf_se_ratio,
+                                       ratio_CI95_L = perf_ratio_CI[1],
+                                       ratio_CI95_H = perf_ratio_CI[2], permutations = n_permut, row.names = NULL)) }
+  
+  
+  
+  out_df <-out_df %>% 
+    arrange(-perf_diff, -diff_CI95_H, -diff_CI95_L) 
+  out_df<- out_df %>% mutate(feature = factor(feature, levels = out_df$feature))
+  
+  class(out_df) <- append(class(out_df), "importance_scores")
+  
+  return(out_df)}
+
+
+
+permutation_importance_plot <- function(imp_scores,
+                                        n_features = 10, 
+                                        type = "diff"){
+  stopifnot("'imp_scores' must be an importance_scores object returned by function permuation_importance()" =  "importance_scores" %in% class(imp_scores))  
+  
+  top_features <-  imp_scores %>% head(n=n_features)
+  y_name <- imp_scores$performance_score[1]
+  
+  if(type == "diff"){
+    p <- ggplot(data=top_features, aes(x=feature, y=perf_diff)) + geom_point(size = 2) + 
+      geom_segment(aes(y = diff_CI95_L, yend=diff_CI95_H, x=feature, xend=feature)) +
+      geom_hline(yintercept = 0, linetype = "dashed") +
+      scale_x_discrete(limits = rev)+
+      labs(y=paste(y_name, type)) +
+      coord_flip() +
+      theme_classic()}
+  if(type == "ratio"){
+    y_max <- max(imp_scores$ratio_CI95_H)*1.02
+    p <- ggplot(data=top_features, aes(x=feature, y=perf_ratio)) + geom_point(size = 2) + 
+      geom_segment(aes(y = ratio_CI95_L, yend=ratio_CI95_H, x=feature, xend=feature)) +
+      scale_x_discrete(limits = rev)+
+      ylim(0.99, y_max) +
+      labs(y=paste(y_name, type)) +
+      coord_flip() +
+      geom_hline(yintercept = 1, linetype = "dashed") +
+      theme_classic()
+  }
+  return(p)
+}
