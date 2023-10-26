@@ -542,6 +542,7 @@ permutation_importance <- function(model,
   
   if("Classification" %in% model$modelType){
     
+    if(is.null(target_level)) stop("Error: Target level needs to be defined for classification model")
     predicted_values <- predict(model, newdata = train_data,  type = "prob")[[target_level]]
     perf_full <- suppressMessages(pROC::roc(factor(train_data[[target_name]]), predicted_values, type="prob")$auc)
   }
